@@ -7,7 +7,8 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use ai_review::{
-    generate_summary, ClaudeAdapter, CodexAdapter, JsonLedger, Ledger, Orchestrator, ReviewContext,
+    generate_summary, ClaudeAdapter, CodexAdapter, GitHubClient, JsonLedger, Ledger,
+    Orchestrator, ReviewContext,
 };
 
 #[derive(Parser)]
@@ -49,6 +50,14 @@ enum Commands {
         /// Output summary to file
         #[arg(long, default_value = "review_summary.md")]
         output: PathBuf,
+
+        /// Post review summary as PR comment
+        #[arg(long)]
+        post_comment: bool,
+
+        /// Fetch diff from GitHub API instead of file
+        #[arg(long)]
+        fetch_diff: bool,
     },
 
     /// List pending reviews
@@ -112,8 +121,21 @@ async fn main() -> Result<()> {
             branch,
             diff_file,
             output,
+            post_comment,
+            fetch_diff,
         } => {
-            run_review(cli.ledger_path, pr, repo, sha, branch, diff_file, output).await?;
+            run_review(
+                cli.ledger_path,
+                pr,
+                repo,
+                sha,
+                branch,
+                diff_file,
+                output,
+                post_comment,
+                fetch_diff,
+            )
+            .await?;
         }
         Commands::Pending => {
             list_pending(cli.ledger_path)?;
@@ -145,6 +167,8 @@ async fn run_review(
     branch: Option<String>,
     diff_file: Option<PathBuf>,
     output: PathBuf,
+    post_comment: bool,
+    fetch_diff: bool,
 ) -> Result<()> {
     let openai_key = std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
     let anthropic_key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set")?;
@@ -155,23 +179,40 @@ async fn run_review(
 
     let orchestrator = Orchestrator::new(codex, claude, ledger);
 
+    // Parse owner/repo
+    let (owner, repo_name) = parse_repo(&repo)?;
+
+    // Get GitHub client if needed
+    let github = if post_comment || fetch_diff {
+        let token = std::env::var("GITHUB_TOKEN").context("GITHUB_TOKEN not set")?;
+        Some(GitHubClient::new(&token)?)
+    } else {
+        None
+    };
+
     // Read diff
-    let diff = match diff_file {
-        Some(path) => fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read diff file: {}", path.display()))?,
-        None => {
-            use std::io::Read;
-            let mut buffer = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buffer)
-                .context("Failed to read diff from stdin")?;
-            buffer
+    let diff = if fetch_diff {
+        let gh = github.as_ref().unwrap();
+        info!("Fetching diff from GitHub API");
+        gh.get_pr_diff(owner, repo_name, pr).await?
+    } else {
+        match diff_file {
+            Some(path) => fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read diff file: {}", path.display()))?,
+            None => {
+                use std::io::Read;
+                let mut buffer = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut buffer)
+                    .context("Failed to read diff from stdin")?;
+                buffer
+            }
         }
     };
 
     let context = ReviewContext {
         pr_number: pr,
-        repo,
+        repo: repo.clone(),
         branch,
         commit_sha: sha,
         base_sha: None,
@@ -186,10 +227,27 @@ async fn run_review(
 
     info!(output = %output.display(), "Review summary written");
 
+    // Post comment to PR if requested
+    if post_comment {
+        let gh = github.as_ref().unwrap();
+        let comment_id = gh.post_comment(owner, repo_name, pr, &summary).await?;
+        info!(comment_id, "Posted review comment to PR");
+        println!("Posted review comment (ID: {})", comment_id);
+    }
+
     // Print to stdout as well
     println!("{}", summary);
 
     Ok(())
+}
+
+/// Parse owner and repo from "owner/repo" format
+fn parse_repo(repo: &str) -> Result<(&str, &str)> {
+    let parts: Vec<&str> = repo.split('/').collect();
+    if parts.len() != 2 {
+        anyhow::bail!("Invalid repo format. Expected 'owner/repo', got: {}", repo);
+    }
+    Ok((parts[0], parts[1]))
 }
 
 fn list_pending(ledger_path: PathBuf) -> Result<()> {

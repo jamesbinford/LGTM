@@ -1,0 +1,85 @@
+# AI Code Review Pipeline Configuration
+# Copy this file to your repository's .ai-review/config.yml
+
+review:
+  # File patterns to include in review
+  include_patterns:
+    - "**/*.rs"
+    - "**/*.py"
+    - "**/*.ts"
+    - "**/*.tsx"
+    - "**/*.js"
+    - "**/*.jsx"
+    - "**/*.go"
+
+  # File patterns to exclude from review
+  exclude_patterns:
+    - "**/test_*.py"
+    - "**/*_test.go"
+    - "**/*.test.ts"
+    - "**/*.spec.ts"
+    - "**/migrations/**"
+    - "**/node_modules/**"
+    - "**/vendor/**"
+    - "**/*.generated.*"
+    - "**/*.min.js"
+
+# Severity handling
+severity_thresholds:
+  # Block merge if any undecided critical issues exist
+  blocking:
+    - critical
+
+  # Show warning but allow merge
+  warning:
+    - high
+    - medium
+
+# Auto-dismiss rules
+auto_rules:
+  # Auto-dismiss low severity style issues after 14 days
+  - condition: "severity == 'low' AND type == 'style' AND age_days > 14"
+    action: auto_dismiss
+    reason: "Aged out - low severity style issue"
+
+  # Auto-accept if Claude recommends with high confidence
+  - condition: "claude_action == 'accept' AND claude_confidence > 0.95"
+    action: auto_accept
+    reason: "High confidence Claude recommendation"
+
+# Staleness handling
+staleness:
+  # Warn after N days without decision
+  warn_after_days: 3
+
+  # Escalate (notify team lead) after N days
+  escalate_after_days: 7
+
+# Notifications (future feature)
+notifications:
+  slack:
+    enabled: false
+    channel: "#code-review"
+    on_critical: true
+    on_new_review: false
+
+  email:
+    enabled: false
+    recipients: []
+
+# Model configuration
+models:
+  codex:
+    # OpenAI model for initial review
+    model: "gpt-4o"
+    temperature: 0.1
+
+  claude:
+    # Anthropic model for recommendation evaluation
+    model: "claude-sonnet-4-20250514"
+    temperature: 0.1
+
+# Database configuration (for production)
+# database:
+#   url: "${DATABASE_URL}"
+#   max_connections: 5
