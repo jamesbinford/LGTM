@@ -1,0 +1,23 @@
+# Cargo audit configuration
+# https://rustsec.org/
+
+[advisories]
+# Ignored advisories
+ignore = [
+    # RUSTSEC-2023-0071: rsa - Marvin Attack timing sidechannel
+    # Severity: Medium (5.9)
+    # Status: No fix available as of 2025-12
+    #
+    # This vulnerability requires:
+    # - Direct access to RSA decryption operations
+    # - Ability to measure precise timing of decryption
+    # - Many repeated measurements
+    #
+    # Impact on this project:
+    # - rsa is a transitive dependency from sqlx-macros-core and jsonwebtoken
+    # - We don't directly use RSA decryption in a way that exposes timing
+    # - GitHub API authentication uses the library internally
+    #
+    # Will be removed when upstream provides a fix.
+    "RUSTSEC-2023-0071",
+]
