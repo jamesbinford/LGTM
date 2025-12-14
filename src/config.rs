@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub review: ReviewConfig,
@@ -15,19 +15,6 @@ pub struct Config {
     pub staleness: StalenessConfig,
     pub notifications: NotificationsConfig,
     pub models: ModelsConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            review: ReviewConfig::default(),
-            severity_thresholds: SeverityThresholds::default(),
-            auto_rules: Vec::new(),
-            staleness: StalenessConfig::default(),
-            notifications: NotificationsConfig::default(),
-            models: ModelsConfig::default(),
-        }
-    }
 }
 
 /// Review file filtering configuration
@@ -147,20 +134,11 @@ impl Default for SlackConfig {
 }
 
 /// Model configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModelsConfig {
     pub codex: CodexModelConfig,
     pub claude: ClaudeModelConfig,
-}
-
-impl Default for ModelsConfig {
-    fn default() -> Self {
-        Self {
-            codex: CodexModelConfig::default(),
-            claude: ClaudeModelConfig::default(),
-        }
-    }
 }
 
 /// Codex (OpenAI) model configuration

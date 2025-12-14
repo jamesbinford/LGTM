@@ -159,12 +159,11 @@ pub fn generate_summary(review: &Review) -> String {
             crate::models::Severity::Low => "🟢",
         };
 
+        let severity_str = format!("{:?}", s.severity).to_uppercase();
+        let type_str = format!("{:?}", s.suggestion_type);
         md.push_str(&format!(
             "#### {} {} `{}` - {}\n",
-            severity_emoji,
-            format!("{:?}", s.severity).to_uppercase(),
-            s.id,
-            format!("{:?}", s.suggestion_type)
+            severity_emoji, severity_str, s.id, type_str
         ));
 
         md.push_str(&format!(

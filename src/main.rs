@@ -159,6 +159,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_review(
     ledger_path: PathBuf,
     pr: u64,
@@ -286,6 +287,7 @@ fn show_review(ledger_path: PathBuf, repo: &str, pr: u64) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_decision(
     ledger_path: PathBuf,
     repo: &str,
