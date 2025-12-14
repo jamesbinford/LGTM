@@ -1,11 +1,13 @@
 pub mod json;
+pub mod postgres;
 
 pub use json::JsonLedger;
+pub use postgres::{PostgresLedger, RepoStats};
 
 use anyhow::Result;
 use crate::models::Review;
 
-/// Trait for review persistence backends
+/// Trait for review persistence backends (sync version for JSON)
 pub trait Ledger: Send + Sync {
     /// Save a review to the ledger
     fn save(&self, review: &Review) -> Result<()>;
