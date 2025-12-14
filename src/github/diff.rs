@@ -23,6 +23,7 @@ pub fn extract_diff(base_ref: &str, head_ref: &str) -> Result<String> {
 }
 
 /// Extract diff for staged changes
+#[allow(dead_code)]
 pub fn extract_staged_diff() -> Result<String> {
     let output = Command::new("git")
         .args(["diff", "--cached"])
@@ -40,6 +41,7 @@ pub fn extract_staged_diff() -> Result<String> {
 }
 
 /// Parse a unified diff to extract file-level information
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DiffFile {
     pub path: String,
@@ -47,6 +49,7 @@ pub struct DiffFile {
     pub hunks: Vec<DiffHunk>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
     pub old_start: u32,
@@ -57,6 +60,7 @@ pub struct DiffHunk {
 }
 
 /// Parse a unified diff into structured data
+#[allow(dead_code)]
 pub fn parse_diff(diff: &str) -> Vec<DiffFile> {
     let mut files = Vec::new();
     let mut current_file: Option<DiffFile> = None;
@@ -117,6 +121,7 @@ pub fn parse_diff(diff: &str) -> Vec<DiffFile> {
     files
 }
 
+#[allow(dead_code)]
 fn parse_hunk_header(line: &str) -> Option<DiffHunk> {
     // Format: @@ -old_start,old_count +new_start,new_count @@
     let line = line.trim_start_matches("@@ ");

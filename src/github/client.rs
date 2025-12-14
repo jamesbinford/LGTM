@@ -168,6 +168,7 @@ pub struct PrFile {
 }
 
 /// Parse owner and repo from a repo string like "owner/repo"
+#[allow(dead_code)]
 pub fn parse_repo(repo: &str) -> Result<(&str, &str)> {
     let parts: Vec<&str> = repo.split('/').collect();
     if parts.len() != 2 {
