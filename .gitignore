@@ -1,0 +1,19 @@
+# Rust build artifacts
+/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Ledger data (local development)
+.ai-review/ledger/
+
+# OS files
+.DS_Store
+Thumbs.db
