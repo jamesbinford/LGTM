@@ -1,5 +1,7 @@
 # AI Code Review Pipeline - Design Document
 
+> **Implementation Language:** Rust 🦀
+
 ## Overview
 
 A multi-agent code review system where:
@@ -38,7 +40,7 @@ HUMAN DECISION GATE ────────────────────
 
 ## Components to Build
 
-### 1. Orchestrator (`review_orchestrator.py`)
+### 1. Orchestrator (`orchestrator.rs`)
 
 Entry point for CI pipeline. Responsibilities:
 
@@ -52,14 +54,26 @@ Entry point for CI pipeline. Responsibilities:
 
 Thin wrappers normalizing LLM interactions:
 
-```python
-# adapters/codex_adapter.py
-class CodexAdapter:
-    async def review(self, diff: str, context: dict) -> list[Suggestion]
+```rust
+// adapters/codex.rs
+pub struct CodexAdapter {
+    client: reqwest::Client,
+    api_key: String,
+}
 
-# adapters/claude_adapter.py  
-class ClaudeAdapter:
-    async def recommend(self, suggestions: list[Suggestion], diff: str) -> list[Recommendation]
+impl CodexAdapter {
+    pub async fn review(&self, diff: &str, context: &ReviewContext) -> Result<Vec<Suggestion>>;
+}
+
+// adapters/claude.rs
+pub struct ClaudeAdapter {
+    client: reqwest::Client,
+    api_key: String,
+}
+
+impl ClaudeAdapter {
+    pub async fn recommend(&self, suggestions: &[Suggestion], diff: &str) -> Result<Vec<Recommendation>>;
+}
 ```
 
 ### 3. Decision Ledger (Database)
@@ -134,13 +148,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release
 
       - name: Run AI Review
         env:
@@ -149,7 +164,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -m review_orchestrator \
+          ./target/release/ai-review \
             --pr ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
             --sha ${{ github.event.pull_request.head.sha }}
@@ -262,51 +277,87 @@ ai-review-pipeline/
 │   └── workflows/
 │       └── ai-review.yml
 ├── src/
-│   ├── __init__.py
-│   ├── orchestrator.py        # Main entry point
+│   ├── main.rs                # Entry point, CLI dispatch
+│   ├── lib.rs                 # Library root
+│   ├── orchestrator.rs        # Pipeline coordination
 │   ├── adapters/
-│   │   ├── __init__.py
-│   │   ├── base.py            # Abstract adapter interface
-│   │   ├── codex.py           # OpenAI Codex integration
-│   │   └── claude.py          # Claude/Anthropic integration
+│   │   ├── mod.rs
+│   │   ├── codex.rs           # OpenAI Codex integration
+│   │   └── claude.rs          # Claude/Anthropic integration
+│   ├── models.rs              # Suggestion, Recommendation, Review structs
 │   ├── ledger/
-│   │   ├── __init__.py
-│   │   ├── db.py              # Database operations
-│   │   ├── models.py          # SQLAlchemy/Pydantic models
-│   │   └── migrations/        # Alembic migrations
+│   │   ├── mod.rs
+│   │   ├── json.rs            # JSON file persistence (MVP)
+│   │   └── db.rs              # Database operations (Phase 2)
 │   ├── cli/
-│   │   ├── __init__.py
-│   │   └── main.py            # Click/Typer CLI
+│   │   ├── mod.rs
+│   │   └── commands.rs        # Clap CLI commands
 │   ├── github/
-│   │   ├── __init__.py
-│   │   ├── pr.py              # PR comment generation
-│   │   └── diff.py            # Diff extraction
-│   └── config.py              # Configuration loading
+│   │   ├── mod.rs
+│   │   ├── pr.rs              # PR comment generation
+│   │   └── diff.rs            # Diff extraction
+│   └── config.rs              # Configuration loading
 ├── tests/
+│   ├── adapters_test.rs
+│   └── orchestrator_test.rs
 ├── .ai-review/
 │   └── config.yml
-├── requirements.txt
-├── pyproject.toml
+├── Cargo.toml
 └── README.md
+```
+
+## Dependencies (Cargo.toml)
+
+```toml
+[package]
+name = "ai-review"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+octocrab = "0.41"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Phase 2: Database
+# sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.6"
 ```
 
 ## Implementation Priority
 
-1. **Phase 1: Core Pipeline**
-- [ ] Codex adapter with structured output
+1. **Phase 1: Core Pipeline** (Rust)
+- [ ] Project scaffolding (Cargo.toml, module structure)
+- [ ] Data models with serde (Suggestion, Recommendation, Review)
+- [ ] Codex adapter with structured JSON output
 - [ ] Claude adapter for recommendations
 - [ ] Basic orchestrator tying them together
 - [ ] File-based persistence (JSON) for MVP
-1. **Phase 2: Persistence & CLI**
-- [ ] Database schema and migrations
+
+2. **Phase 2: Persistence & CLI**
+- [ ] Database schema and sqlx migrations
 - [ ] Ledger operations (create, query, update)
-- [ ] CLI for viewing and deciding
-1. **Phase 3: CI Integration**
+- [ ] Clap CLI for viewing and deciding
+
+3. **Phase 3: CI Integration**
 - [ ] GitHub Actions workflow
-- [ ] PR comment generation
+- [ ] PR comment generation with octocrab
 - [ ] Diff extraction utilities
-1. **Phase 4: Polish**
-- [ ] Configuration system
+
+4. **Phase 4: Polish**
+- [ ] Configuration system (config.yml parsing)
 - [ ] Staleness handling
 - [ ] Auto-rules engine
 - [ ] Notifications (Slack, etc.)
