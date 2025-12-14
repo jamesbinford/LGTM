@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tracing::{debug, info};
 
 use crate::config::{AutoAction, AutoRule, Config};
@@ -30,7 +30,7 @@ impl RulesEngine {
                 continue; // Already decided
             }
 
-            if let Some((action, reason)) = self.evaluate_rules(item) {
+            if let Some((action, reason)) = self.evaluate_rules(item, review.created_at) {
                 let decision = match action {
                     AutoAction::AutoAccept => HumanDecision::Accepted,
                     AutoAction::AutoDismiss => HumanDecision::Rejected,
@@ -58,8 +58,12 @@ impl RulesEngine {
         count
     }
 
-    fn evaluate_rules(&self, item: &SuggestionWithRecommendation) -> Option<(AutoAction, String)> {
-        let context = RuleContext::from_suggestion(item);
+    fn evaluate_rules(
+        &self,
+        item: &SuggestionWithRecommendation,
+        created_at: DateTime<Utc>,
+    ) -> Option<(AutoAction, String)> {
+        let context = RuleContext::from_suggestion(item, created_at);
 
         for rule in &self.rules {
             if self.matches_condition(&rule.condition, &context) {
@@ -190,10 +194,8 @@ struct RuleContext {
 }
 
 impl RuleContext {
-    fn from_suggestion(item: &SuggestionWithRecommendation) -> Self {
-        let age_days = Utc::now()
-            .signed_duration_since(Utc::now()) // TODO: Use actual creation time
-            .num_days();
+    fn from_suggestion(item: &SuggestionWithRecommendation, created_at: DateTime<Utc>) -> Self {
+        let age_days = Utc::now().signed_duration_since(created_at).num_days();
 
         Self {
             severity: severity_to_string(item.suggestion.severity),
@@ -276,14 +278,15 @@ mod tests {
 
         let engine = RulesEngine::new(rules);
         let mut item = make_suggestion(Severity::Low, SuggestionType::Style);
+        let created_at = Utc::now();
 
-        let result = engine.evaluate_rules(&item);
+        let result = engine.evaluate_rules(&item, created_at);
         assert!(result.is_some());
         assert_eq!(result.unwrap().0, AutoAction::AutoDismiss);
 
         // High severity should not match
         item.suggestion.severity = Severity::High;
-        let result = engine.evaluate_rules(&item);
+        let result = engine.evaluate_rules(&item, created_at);
         assert!(result.is_none());
     }
 
@@ -297,8 +300,9 @@ mod tests {
 
         let engine = RulesEngine::new(rules);
         let item = make_suggestion(Severity::Medium, SuggestionType::Logic);
+        let created_at = Utc::now();
 
-        let result = engine.evaluate_rules(&item);
+        let result = engine.evaluate_rules(&item, created_at);
         assert!(result.is_some());
         assert_eq!(result.unwrap().0, AutoAction::AutoAccept);
     }
@@ -312,15 +316,16 @@ mod tests {
         }];
 
         let engine = RulesEngine::new(rules);
+        let created_at = Utc::now();
 
         // Matches both conditions
         let item = make_suggestion(Severity::Low, SuggestionType::Style);
-        let result = engine.evaluate_rules(&item);
+        let result = engine.evaluate_rules(&item, created_at);
         assert!(result.is_some());
 
         // Only matches severity
         let item = make_suggestion(Severity::Low, SuggestionType::Security);
-        let result = engine.evaluate_rules(&item);
+        let result = engine.evaluate_rules(&item, created_at);
         assert!(result.is_none());
     }
 }
