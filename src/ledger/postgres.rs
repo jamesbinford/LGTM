@@ -54,7 +54,7 @@ impl PostgresLedger {
             "#,
         )
         .bind(review.id)
-        .bind(review.pr_number as i64)
+        .bind(review.pr_number.map(|n| n as i64))
         .bind(&review.repo)
         .bind(&review.branch)
         .bind(&review.commit_sha)
@@ -151,6 +151,31 @@ impl PostgresLedger {
         )
         .bind(repo)
         .bind(pr_number as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            Some(row) => {
+                let review = self.build_review_from_row(&row).await?;
+                Ok(Some(review))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Load a review by commit SHA
+    pub async fn load_by_commit(&self, repo: &str, commit_sha: &str) -> Result<Option<Review>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, pr_number, repo, branch, commit_sha, created_at, status
+            FROM reviews
+            WHERE repo = $1 AND commit_sha = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(repo)
+        .bind(commit_sha)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -267,7 +292,7 @@ impl PostgresLedger {
 
     async fn build_review_from_row(&self, row: &sqlx::postgres::PgRow) -> Result<Review> {
         let id: Uuid = row.get("id");
-        let pr_number: i64 = row.get("pr_number");
+        let pr_number: Option<i64> = row.get("pr_number");
         let repo: String = row.get("repo");
         let branch: Option<String> = row.get("branch");
         let commit_sha: String = row.get("commit_sha");
@@ -337,7 +362,7 @@ impl PostgresLedger {
 
         Ok(Review {
             id,
-            pr_number: pr_number as u64,
+            pr_number: pr_number.map(|n| n as u64),
             repo,
             branch,
             commit_sha,

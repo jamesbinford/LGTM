@@ -96,7 +96,7 @@ pub enum ReviewStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Review {
     pub id: Uuid,
-    pub pr_number: u64,
+    pub pr_number: Option<u64>,
     pub repo: String,
     pub branch: Option<String>,
     pub commit_sha: String,
@@ -116,7 +116,7 @@ pub struct SuggestionWithRecommendation {
 /// Context for a review request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewContext {
-    pub pr_number: u64,
+    pub pr_number: Option<u64>,
     pub repo: String,
     pub branch: Option<String>,
     pub commit_sha: String,

@@ -178,9 +178,13 @@ Only review the changed lines (+ lines in diff), not removed lines."#
     }
 
     fn build_user_prompt(&self, diff: &str, context: &ReviewContext) -> String {
+        let target = match context.pr_number {
+            Some(pr) => format!("PR #{}", pr),
+            None => format!("commit {}", &context.commit_sha[..7.min(context.commit_sha.len())]),
+        };
         format!(
-            "Review this diff from PR #{} in {}:\n\n```diff\n{}\n```",
-            context.pr_number, context.repo, diff
+            "Review this diff from {} in {}:\n\n```diff\n{}\n```",
+            target, context.repo, diff
         )
     }
 

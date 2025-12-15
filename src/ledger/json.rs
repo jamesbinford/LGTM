@@ -62,7 +62,8 @@ struct ReviewIndex {
 struct ReviewIndexEntry {
     id: Uuid,
     repo: String,
-    pr_number: u64,
+    pr_number: Option<u64>,
+    commit_sha: String,
     status: ReviewStatus,
 }
 
@@ -85,6 +86,7 @@ impl Ledger for JsonLedger {
             id: review.id,
             repo: review.repo.clone(),
             pr_number: review.pr_number,
+            commit_sha: review.commit_sha.clone(),
             status: review.status,
         });
 
@@ -115,7 +117,21 @@ impl Ledger for JsonLedger {
         let entry = index
             .reviews
             .iter()
-            .find(|r| r.repo == repo && r.pr_number == pr_number);
+            .find(|r| r.repo == repo && r.pr_number == Some(pr_number));
+
+        match entry {
+            Some(e) => self.load(&e.id),
+            None => Ok(None),
+        }
+    }
+
+    fn load_by_commit(&self, repo: &str, commit_sha: &str) -> Result<Option<Review>> {
+        let index = self.load_index()?;
+
+        let entry = index
+            .reviews
+            .iter()
+            .find(|r| r.repo == repo && r.commit_sha == commit_sha);
 
         match entry {
             Some(e) => self.load(&e.id),
@@ -162,7 +178,7 @@ mod tests {
         let ledger = JsonLedger::new(dir.path()).unwrap();
 
         let review = Review::new(ReviewContext {
-            pr_number: 123,
+            pr_number: Some(123),
             repo: "owner/repo".to_string(),
             branch: Some("feature".to_string()),
             commit_sha: "abc123".to_string(),
@@ -172,7 +188,7 @@ mod tests {
         ledger.save(&review).unwrap();
 
         let loaded = ledger.load(&review.id).unwrap().unwrap();
-        assert_eq!(loaded.pr_number, 123);
+        assert_eq!(loaded.pr_number, Some(123));
         assert_eq!(loaded.repo, "owner/repo");
     }
 
@@ -182,7 +198,7 @@ mod tests {
         let ledger = JsonLedger::new(dir.path()).unwrap();
 
         let review = Review::new(ReviewContext {
-            pr_number: 456,
+            pr_number: Some(456),
             repo: "owner/repo".to_string(),
             branch: None,
             commit_sha: "def456".to_string(),
@@ -193,5 +209,25 @@ mod tests {
 
         let loaded = ledger.load_by_pr("owner/repo", 456).unwrap().unwrap();
         assert_eq!(loaded.id, review.id);
+    }
+
+    #[test]
+    fn test_load_by_commit() {
+        let dir = tempdir().unwrap();
+        let ledger = JsonLedger::new(dir.path()).unwrap();
+
+        let review = Review::new(ReviewContext {
+            pr_number: None,
+            repo: "owner/repo".to_string(),
+            branch: Some("main".to_string()),
+            commit_sha: "abc789".to_string(),
+            base_sha: None,
+        });
+
+        ledger.save(&review).unwrap();
+
+        let loaded = ledger.load_by_commit("owner/repo", "abc789").unwrap().unwrap();
+        assert_eq!(loaded.id, review.id);
+        assert_eq!(loaded.pr_number, None);
     }
 }

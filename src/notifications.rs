@@ -140,10 +140,14 @@ impl SlackNotifier {
             .filter(|s| s.suggestion.severity == Severity::High)
             .count();
 
+        let target = match review.pr_number {
+            Some(pr) => format!("PR #{}", pr),
+            None => format!("commit {}", &review.commit_sha[..7.min(review.commit_sha.len())]),
+        };
         let text = format!(
-            "🔍 New AI Code Review for PR #{} in `{}`\n\
+            "🔍 New AI Code Review for {} in `{}`\n\
              📊 {} suggestions ({} critical, {} high)",
-            review.pr_number,
+            target,
             review.repo,
             review.suggestions.len(),
             critical,
@@ -175,10 +179,14 @@ impl SlackNotifier {
     }
 
     async fn notify_critical(&self, client: &Client, review: &Review, count: usize) -> Result<()> {
+        let target = match review.pr_number {
+            Some(pr) => format!("PR #{}", pr),
+            None => format!("commit {}", &review.commit_sha[..7.min(review.commit_sha.len())]),
+        };
         let text = format!(
-            "🚨 *CRITICAL* issues found in PR #{} in `{}`\n\
+            "🚨 *CRITICAL* issues found in {} in `{}`\n\
              Found {} critical security/logic issues requiring immediate attention.",
-            review.pr_number, review.repo, count
+            target, review.repo, count
         );
 
         let issues: Vec<String> = review
@@ -220,10 +228,14 @@ impl SlackNotifier {
     async fn notify_stale(&self, client: &Client, review: &Review, age_days: i64) -> Result<()> {
         let pending = review.pending_suggestions().len();
 
+        let target = match review.pr_number {
+            Some(pr) => format!("PR #{}", pr),
+            None => format!("commit {}", &review.commit_sha[..7.min(review.commit_sha.len())]),
+        };
         let text = format!(
-            "⏰ Stale review alert: PR #{} in `{}`\n\
+            "⏰ Stale review alert: {} in `{}`\n\
              This review has been pending for {} days with {} undecided suggestions.",
-            review.pr_number, review.repo, age_days, pending
+            target, review.repo, age_days, pending
         );
 
         let message = SlackMessage {

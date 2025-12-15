@@ -21,16 +21,23 @@ impl<L: Ledger> Orchestrator<L> {
         }
     }
 
-    /// Run the full review pipeline for a PR
+    /// Run the full review pipeline for a PR or commit
     pub async fn review(&self, diff: &str, context: ReviewContext) -> Result<Review> {
         info!(
-            pr = context.pr_number,
+            pr = ?context.pr_number,
             repo = %context.repo,
+            commit = %context.commit_sha,
             "Starting review pipeline"
         );
 
-        // Check for existing review
-        if let Some(existing) = self.ledger.load_by_pr(&context.repo, context.pr_number)? {
+        // Check for existing review by PR number or commit SHA
+        let existing = if let Some(pr) = context.pr_number {
+            self.ledger.load_by_pr(&context.repo, pr)?
+        } else {
+            self.ledger.load_by_commit(&context.repo, &context.commit_sha)?
+        };
+
+        if let Some(existing) = existing {
             if existing.commit_sha == context.commit_sha {
                 info!("Review already exists for this commit");
                 return Ok(existing);
@@ -221,9 +228,23 @@ mod tests {
     #[test]
     fn test_generate_summary_empty() {
         let review = Review::new(ReviewContext {
-            pr_number: 1,
+            pr_number: Some(1),
             repo: "test/repo".to_string(),
             branch: None,
+            commit_sha: "abc".to_string(),
+            base_sha: None,
+        });
+
+        let summary = generate_summary(&review);
+        assert!(summary.contains("No issues found"));
+    }
+
+    #[test]
+    fn test_generate_summary_empty_no_pr() {
+        let review = Review::new(ReviewContext {
+            pr_number: None,
+            repo: "test/repo".to_string(),
+            branch: Some("main".to_string()),
             commit_sha: "abc".to_string(),
             base_sha: None,
         });

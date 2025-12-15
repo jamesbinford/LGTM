@@ -18,6 +18,9 @@ pub trait Ledger: Send + Sync {
     /// Load a review by PR number
     fn load_by_pr(&self, repo: &str, pr_number: u64) -> Result<Option<Review>>;
 
+    /// Load a review by commit SHA
+    fn load_by_commit(&self, repo: &str, commit_sha: &str) -> Result<Option<Review>>;
+
     /// List all pending reviews
     fn list_pending(&self) -> Result<Vec<Review>>;
 

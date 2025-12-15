@@ -25,11 +25,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run a review on a PR
+    /// Run a review on a PR or commit
     Review {
-        /// PR number
+        /// PR number (optional for push events)
         #[arg(long)]
-        pr: u64,
+        pr: Option<u64>,
 
         /// Repository (owner/repo)
         #[arg(long)]
@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn run_review(
     ledger_path: PathBuf,
-    pr: u64,
+    pr: Option<u64>,
     repo: String,
     sha: String,
     branch: Option<String>,
@@ -171,6 +171,14 @@ async fn run_review(
     post_comment: bool,
     fetch_diff: bool,
 ) -> Result<()> {
+    // Validate that PR is provided if post_comment or fetch_diff is requested
+    if post_comment && pr.is_none() {
+        anyhow::bail!("--post-comment requires --pr to be specified");
+    }
+    if fetch_diff && pr.is_none() {
+        anyhow::bail!("--fetch-diff requires --pr to be specified");
+    }
+
     let openai_key = std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
     let anthropic_key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set")?;
 
@@ -194,8 +202,9 @@ async fn run_review(
     // Read diff
     let diff = if fetch_diff {
         let gh = github.as_ref().unwrap();
+        let pr_num = pr.unwrap(); // Safe due to validation above
         info!("Fetching diff from GitHub API");
-        gh.get_pr_diff(owner, repo_name, pr).await?
+        gh.get_pr_diff(owner, repo_name, pr_num).await?
     } else {
         match diff_file {
             Some(path) => fs::read_to_string(&path)
@@ -231,7 +240,8 @@ async fn run_review(
     // Post comment to PR if requested
     if post_comment {
         let gh = github.as_ref().unwrap();
-        let comment_id = gh.post_comment(owner, repo_name, pr, &summary).await?;
+        let pr_num = pr.unwrap(); // Safe due to validation above
+        let comment_id = gh.post_comment(owner, repo_name, pr_num, &summary).await?;
         info!(comment_id, "Posted review comment to PR");
         println!("Posted review comment (ID: {})", comment_id);
     }
@@ -263,9 +273,13 @@ fn list_pending(ledger_path: PathBuf) -> Result<()> {
     println!("Pending Reviews:\n");
     for review in reviews {
         let pending_count = review.pending_suggestions().len();
+        let target = match review.pr_number {
+            Some(pr) => format!("PR #{}", pr),
+            None => format!("commit {}", &review.commit_sha[..7.min(review.commit_sha.len())]),
+        };
         println!(
-            "  PR #{} in {} - {} pending suggestions",
-            review.pr_number, review.repo, pending_count
+            "  {} in {} - {} pending suggestions",
+            target, review.repo, pending_count
         );
         println!("    ID: {}", review.id);
         println!("    Commit: {}", review.commit_sha);
