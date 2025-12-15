@@ -47,7 +47,7 @@ auto_rules:
     action: auto_accept
     reason: "High confidence Claude recommendation"
 
-# Staleness handling
+# Staleness handling testing
 staleness:
   # Warn after N days without decision
   warn_after_days: 3
