@@ -3,10 +3,13 @@ name: AI Code Review
 on:
   pull_request:
     types: [opened, synchronize]
+  push:
+    branches:
+      - main
 
-# Cancel in-progress runs for the same PR
+# Cancel in-progress runs for the same PR or branch
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number }}
+  group: ai-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,13 +34,21 @@ jobs:
       - name: Build ai-review
         run: cargo build --release
 
-      - name: Generate diff
+      - name: Generate diff (PR)
+        if: github.event_name == 'pull_request'
         run: |
           git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
           echo "Diff size: $(wc -c < pr_diff.txt) bytes"
 
-      - name: Run AI Review
-        id: review
+      - name: Generate diff (Push)
+        if: github.event_name == 'push'
+        run: |
+          git diff ${{ github.event.before }}..${{ github.sha }} > pr_diff.txt
+          echo "Diff size: $(wc -c < pr_diff.txt) bytes"
+
+      - name: Run AI Review (PR)
+        if: github.event_name == 'pull_request'
+        id: review-pr
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -51,6 +62,21 @@ jobs:
             --diff-file pr_diff.txt \
             --output review_summary.md \
             --post-comment
+
+      - name: Run AI Review (Push)
+        if: github.event_name == 'push'
+        id: review-push
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./target/release/ai-review review \
+            --repo ${{ github.repository }} \
+            --sha ${{ github.sha }} \
+            --branch ${{ github.ref_name }} \
+            --diff-file pr_diff.txt \
+            --output review_summary.md
 
       - name: Upload review artifacts
         uses: actions/upload-artifact@v4
