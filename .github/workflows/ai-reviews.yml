@@ -15,8 +15,10 @@ concurrency:
 jobs:
   ai-review:
     runs-on: ubuntu-latest
+    # Skip if this is a commit from the bot itself (prevents infinite loops)
+    if: github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '🤖 Generated with')
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 
     steps:
@@ -71,12 +73,30 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          mkdir -p lgtm-reviews
+          REVIEW_FILE="lgtm-reviews/${{ github.sha }}.md"
           ./target/release/ai-review review \
             --repo ${{ github.repository }} \
             --sha ${{ github.sha }} \
             --branch ${{ github.ref_name }} \
             --diff-file pr_diff.txt \
-            --output review_summary.md
+            --output "$REVIEW_FILE"
+          echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
+
+      - name: Commit review (Push)
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lgtm-reviews/
+          if git diff --staged --quiet; then
+            echo "No review changes to commit"
+          else
+            git commit -m "Add AI review for ${{ github.sha }}
+
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+            git push
+          fi
 
       - name: Upload review artifacts
         uses: actions/upload-artifact@v4
@@ -85,5 +105,6 @@ jobs:
           name: ai-review-results
           path: |
             review_summary.md
+            lgtm-reviews/
             .ai-review/ledger/
           retention-days: 30
