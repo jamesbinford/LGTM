@@ -7,13 +7,13 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use ai_review::{
-    generate_summary, ClaudeAdapter, CodexAdapter, GitHubClient, JsonLedger, Ledger,
+    generate_summary, CodexAdapter, GitHubClient, JsonLedger, Ledger,
     Orchestrator, ReviewContext,
 };
 
 #[derive(Parser)]
 #[command(name = "ai-review")]
-#[command(about = "Multi-agent AI code review pipeline")]
+#[command(about = "AI code review pipeline")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -180,13 +180,11 @@ async fn run_review(
     }
 
     let openai_key = std::env::var("OPENAI_API_KEY").context("OPENAI_API_KEY not set")?;
-    let anthropic_key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY not set")?;
 
     let codex = CodexAdapter::new(openai_key);
-    let claude = ClaudeAdapter::new(anthropic_key);
     let ledger = JsonLedger::new(&ledger_path)?;
 
-    let orchestrator = Orchestrator::new(codex, claude, ledger);
+    let orchestrator = Orchestrator::new(codex, ledger);
 
     // Parse owner/repo
     let (owner, repo_name) = parse_repo(&repo)?;

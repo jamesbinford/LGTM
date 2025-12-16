@@ -42,11 +42,6 @@ auto_rules:
     action: auto_dismiss
     reason: "Aged out - low severity style issue"
 
-  # Auto-accept if Claude recommends with high confidence
-  - condition: "claude_action == 'accept' AND claude_confidence > 0.95"
-    action: auto_accept
-    reason: "High confidence Claude recommendation"
-
 # Staleness handling testing
 staleness:
   # Warn after N days without decision
@@ -72,11 +67,6 @@ models:
   codex:
     # OpenAI model for initial review
     model: "gpt-4o"
-    temperature: 0.1
-
-  claude:
-    # Anthropic model for recommendation evaluation
-    model: "claude-sonnet-4-20250514"
     temperature: 0.1
 
 # Database configuration (for production)

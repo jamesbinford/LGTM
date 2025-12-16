@@ -3,8 +3,7 @@ use tracing::{debug, info};
 
 use crate::config::{AutoAction, AutoRule, Config};
 use crate::models::{
-    DecisionRecord, HumanDecision, RecommendedAction, Review, Severity, SuggestionType,
-    SuggestionWithRecommendation,
+    DecisionRecord, HumanDecision, Review, Severity, SuggestionItem, SuggestionType,
 };
 
 /// Rules engine for automatic decisions
@@ -60,7 +59,7 @@ impl RulesEngine {
 
     fn evaluate_rules(
         &self,
-        item: &SuggestionWithRecommendation,
+        item: &SuggestionItem,
         created_at: DateTime<Utc>,
     ) -> Option<(AutoAction, String)> {
         let context = RuleContext::from_suggestion(item, created_at);
@@ -82,7 +81,6 @@ impl RulesEngine {
     fn matches_condition(&self, condition: &str, ctx: &RuleContext) -> bool {
         // Simple expression parser for conditions like:
         // "severity == 'low' AND type == 'style' AND age_days > 14"
-        // "claude_action == 'accept' AND claude_confidence > 0.95"
 
         let parts: Vec<&str> = condition.split(" AND ").collect();
 
@@ -172,11 +170,6 @@ impl RulesEngine {
             "severity" => ctx.severity.clone(),
             "type" => ctx.suggestion_type.clone(),
             "age_days" => ctx.age_days.to_string(),
-            "claude_action" => ctx.claude_action.clone().unwrap_or_default(),
-            "claude_confidence" => ctx
-                .claude_confidence
-                .map(|c| c.to_string())
-                .unwrap_or_default(),
             "file_path" => ctx.file_path.clone(),
             _ => String::new(),
         }
@@ -188,21 +181,17 @@ struct RuleContext {
     severity: String,
     suggestion_type: String,
     age_days: i64,
-    claude_action: Option<String>,
-    claude_confidence: Option<f64>,
     file_path: String,
 }
 
 impl RuleContext {
-    fn from_suggestion(item: &SuggestionWithRecommendation, created_at: DateTime<Utc>) -> Self {
+    fn from_suggestion(item: &SuggestionItem, created_at: DateTime<Utc>) -> Self {
         let age_days = Utc::now().signed_duration_since(created_at).num_days();
 
         Self {
             severity: severity_to_string(item.suggestion.severity),
             suggestion_type: type_to_string(item.suggestion.suggestion_type),
             age_days,
-            claude_action: item.recommendation.as_ref().map(|r| action_to_string(r.action)),
-            claude_confidence: item.recommendation.as_ref().map(|r| r.confidence),
             file_path: item.suggestion.location.file.clone(),
         }
     }
@@ -229,22 +218,13 @@ fn type_to_string(t: SuggestionType) -> String {
     .to_string()
 }
 
-fn action_to_string(a: RecommendedAction) -> String {
-    match a {
-        RecommendedAction::Accept => "accept",
-        RecommendedAction::Reject => "reject",
-        RecommendedAction::Modify => "modify",
-    }
-    .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Location, Recommendation, Suggestion};
+    use crate::models::{Location, Suggestion};
 
-    fn make_suggestion(severity: Severity, stype: SuggestionType) -> SuggestionWithRecommendation {
-        SuggestionWithRecommendation {
+    fn make_suggestion(severity: Severity, stype: SuggestionType) -> SuggestionItem {
+        SuggestionItem {
             suggestion: Suggestion {
                 id: "S001".to_string(),
                 suggestion_type: stype,
@@ -257,13 +237,6 @@ mod tests {
                 description: "Test suggestion".to_string(),
                 proposed_fix: None,
             },
-            recommendation: Some(Recommendation {
-                suggestion_id: "S001".to_string(),
-                action: RecommendedAction::Accept,
-                confidence: 0.98,
-                rationale: "Good suggestion".to_string(),
-                modified_fix: None,
-            }),
             decision: None,
         }
     }
@@ -288,23 +261,6 @@ mod tests {
         item.suggestion.severity = Severity::High;
         let result = engine.evaluate_rules(&item, created_at);
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_confidence_threshold() {
-        let rules = vec![AutoRule {
-            condition: "claude_action == 'accept' AND claude_confidence > 0.95".to_string(),
-            action: AutoAction::AutoAccept,
-            reason: "High confidence auto-accepted".to_string(),
-        }];
-
-        let engine = RulesEngine::new(rules);
-        let item = make_suggestion(Severity::Medium, SuggestionType::Logic);
-        let created_at = Utc::now();
-
-        let result = engine.evaluate_rules(&item, created_at);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().0, AutoAction::AutoAccept);
     }
 
     #[test]

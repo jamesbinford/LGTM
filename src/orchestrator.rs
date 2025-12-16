@@ -1,27 +1,25 @@
 use anyhow::{Context, Result};
-use tracing::{info, warn};
+use tracing::info;
 
-use crate::adapters::{ClaudeAdapter, CodexAdapter};
+use crate::adapters::CodexAdapter;
 use crate::ledger::Ledger;
-use crate::models::{Review, ReviewContext, ReviewStatus, SuggestionWithRecommendation};
+use crate::models::{Review, ReviewContext, ReviewStatus, SuggestionItem};
 
-/// Orchestrates the multi-agent review pipeline
+/// Orchestrates the AI review pipeline
 pub struct Orchestrator<L: Ledger> {
     codex: CodexAdapter,
-    claude: ClaudeAdapter,
     ledger: L,
 }
 
 impl<L: Ledger> Orchestrator<L> {
-    pub fn new(codex: CodexAdapter, claude: ClaudeAdapter, ledger: L) -> Self {
+    pub fn new(codex: CodexAdapter, ledger: L) -> Self {
         Self {
             codex,
-            claude,
             ledger,
         }
     }
 
-    /// Run the full review pipeline for a PR or commit
+    /// Run the review pipeline for a PR or commit
     pub async fn review(&self, diff: &str, context: ReviewContext) -> Result<Review> {
         info!(
             pr = ?context.pr_number,
@@ -48,8 +46,8 @@ impl<L: Ledger> Orchestrator<L> {
         // Create new review
         let mut review = Review::new(context.clone());
 
-        // Step 1: Get Codex suggestions
-        info!("Step 1: Running Codex review");
+        // Run Codex review
+        info!("Running Codex review");
         let suggestions = self
             .codex
             .review(diff, &context)
@@ -65,28 +63,10 @@ impl<L: Ledger> Orchestrator<L> {
 
         info!(count = suggestions.len(), "Codex found issues");
 
-        // Step 2: Get Claude recommendations
-        info!("Step 2: Running Claude evaluation");
-        let recommendations = self
-            .claude
-            .recommend(&suggestions, diff)
-            .await
-            .context("Claude recommendation failed")?;
-
-        // Combine suggestions with recommendations
+        // Store suggestions
         for suggestion in suggestions {
-            let recommendation = recommendations
-                .iter()
-                .find(|r| r.suggestion_id == suggestion.id)
-                .cloned();
-
-            if recommendation.is_none() {
-                warn!(id = %suggestion.id, "No recommendation for suggestion");
-            }
-
-            review.suggestions.push(SuggestionWithRecommendation {
+            review.suggestions.push(SuggestionItem {
                 suggestion,
-                recommendation,
                 decision: None,
             });
         }
@@ -182,28 +162,6 @@ pub fn generate_summary(review: &Review) -> String {
 
         if let Some(fix) = &s.proposed_fix {
             md.push_str(&format!("**Proposed fix:**\n```\n{}\n```\n\n", fix));
-        }
-
-        // Claude recommendation
-        if let Some(rec) = &item.recommendation {
-            let action_emoji = match rec.action {
-                crate::models::RecommendedAction::Accept => "✅",
-                crate::models::RecommendedAction::Reject => "❌",
-                crate::models::RecommendedAction::Modify => "🔧",
-            };
-
-            md.push_str(&format!(
-                "**Claude recommends:** {} {:?} (confidence: {:.0}%)\n\n",
-                action_emoji,
-                rec.action,
-                rec.confidence * 100.0
-            ));
-
-            md.push_str(&format!("> {}\n\n", rec.rationale));
-
-            if let Some(modified) = &rec.modified_fix {
-                md.push_str(&format!("**Modified fix:**\n```\n{}\n```\n\n", modified));
-            }
         }
 
         md.push_str("---\n\n");

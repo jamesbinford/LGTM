@@ -138,7 +138,6 @@ impl Default for SlackConfig {
 #[serde(default)]
 pub struct ModelsConfig {
     pub codex: CodexModelConfig,
-    pub claude: ClaudeModelConfig,
 }
 
 /// Codex (OpenAI) model configuration
@@ -153,23 +152,6 @@ impl Default for CodexModelConfig {
     fn default() -> Self {
         Self {
             model: "gpt-4o".to_string(),
-            temperature: 0.1,
-        }
-    }
-}
-
-/// Claude model configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ClaudeModelConfig {
-    pub model: String,
-    pub temperature: f32,
-}
-
-impl Default for ClaudeModelConfig {
-    fn default() -> Self {
-        Self {
-            model: "claude-sonnet-4-20250514".to_string(),
             temperature: 0.1,
         }
     }

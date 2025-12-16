@@ -7,7 +7,7 @@ pub mod notifications;
 pub mod orchestrator;
 pub mod rules;
 
-pub use adapters::{ClaudeAdapter, CodexAdapter};
+pub use adapters::CodexAdapter;
 pub use config::Config;
 pub use github::GitHubClient;
 pub use ledger::{JsonLedger, Ledger, PostgresLedger, RepoStats};

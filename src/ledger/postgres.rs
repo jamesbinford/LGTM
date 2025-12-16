@@ -5,8 +5,8 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::models::{
-    DecisionRecord, HumanDecision, Location, Recommendation, RecommendedAction, Review,
-    ReviewStatus, Severity, Suggestion, SuggestionType, SuggestionWithRecommendation,
+    DecisionRecord, HumanDecision, Location, Review, ReviewStatus, Severity, Suggestion,
+    SuggestionItem, SuggestionType,
 };
 
 /// PostgreSQL-backed ledger for production persistence
@@ -73,7 +73,6 @@ impl PostgresLedger {
         // Insert suggestions
         for item in &review.suggestions {
             let s = &item.suggestion;
-            let r = &item.recommendation;
             let d = &item.decision;
 
             sqlx::query(
@@ -81,10 +80,9 @@ impl PostgresLedger {
                 INSERT INTO suggestions (
                     review_id, external_id, suggestion_type, severity,
                     file_path, line_start, line_end, description, proposed_fix,
-                    claude_action, claude_confidence, claude_rationale, claude_modified_fix,
                     human_decision, human_reason, decided_by, decided_at
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
                 )
                 "#,
             )
@@ -97,10 +95,6 @@ impl PostgresLedger {
             .bind(s.location.line_end as i32)
             .bind(&s.description)
             .bind(&s.proposed_fix)
-            .bind(r.as_ref().map(|r| action_to_str(r.action)))
-            .bind(r.as_ref().map(|r| r.confidence))
-            .bind(r.as_ref().map(|r| &r.rationale))
-            .bind(r.as_ref().and_then(|r| r.modified_fix.as_ref()))
             .bind(d.as_ref().map(|d| decision_to_str(d.decision)))
             .bind(d.as_ref().and_then(|d| d.reason.as_ref()))
             .bind(d.as_ref().map(|d| &d.decided_by))
@@ -304,8 +298,7 @@ impl PostgresLedger {
             r#"
             SELECT
                 external_id, suggestion_type, severity, file_path, line_start, line_end,
-                description, proposed_fix, claude_action, claude_confidence, claude_rationale,
-                claude_modified_fix, human_decision, human_reason, decided_by, decided_at
+                description, proposed_fix, human_decision, human_reason, decided_by, decided_at
             FROM suggestions
             WHERE review_id = $1
             ORDER BY external_id
@@ -330,32 +323,21 @@ impl PostgresLedger {
                 proposed_fix: srow.get("proposed_fix"),
             };
 
-            let recommendation = match srow.get::<Option<String>, _>("claude_action") {
-                Some(action) => Some(Recommendation {
-                    suggestion_id: suggestion.id.clone(),
-                    action: str_to_action(&action),
-                    confidence: srow.get::<Option<f64>, _>("claude_confidence").unwrap_or(0.0),
-                    rationale: srow.get::<Option<String>, _>("claude_rationale").unwrap_or_default(),
-                    modified_fix: srow.get("claude_modified_fix"),
-                }),
-                None => None,
-            };
-
             let decision = match srow.get::<Option<String>, _>("human_decision") {
                 Some(dec) => Some(DecisionRecord {
                     suggestion_id: suggestion.id.clone(),
                     decision: str_to_decision(&dec),
                     reason: srow.get("human_reason"),
                     decided_by: srow.get::<Option<String>, _>("decided_by").unwrap_or_default(),
-                    decided_at: srow.get::<Option<chrono::DateTime<chrono::Utc>>, _>("decided_at")
+                    decided_at: srow
+                        .get::<Option<chrono::DateTime<chrono::Utc>>, _>("decided_at")
                         .unwrap_or_else(chrono::Utc::now),
                 }),
                 None => None,
             };
 
-            suggestions.push(SuggestionWithRecommendation {
+            suggestions.push(SuggestionItem {
                 suggestion,
-                recommendation,
                 decision,
             });
         }
@@ -440,23 +422,6 @@ fn str_to_severity(s: &str) -> Severity {
         "medium" => Severity::Medium,
         "low" => Severity::Low,
         _ => Severity::Low,
-    }
-}
-
-fn action_to_str(a: RecommendedAction) -> &'static str {
-    match a {
-        RecommendedAction::Accept => "accept",
-        RecommendedAction::Reject => "reject",
-        RecommendedAction::Modify => "modify",
-    }
-}
-
-fn str_to_action(s: &str) -> RecommendedAction {
-    match s {
-        "accept" => RecommendedAction::Accept,
-        "reject" => RecommendedAction::Reject,
-        "modify" => RecommendedAction::Modify,
-        _ => RecommendedAction::Reject,
     }
 }
 

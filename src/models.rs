@@ -43,25 +43,6 @@ pub struct Suggestion {
     pub proposed_fix: Option<String>,
 }
 
-/// Claude's recommended action for a suggestion
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RecommendedAction {
-    Accept,
-    Reject,
-    Modify,
-}
-
-/// Claude's recommendation on a Codex suggestion
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Recommendation {
-    pub suggestion_id: String,
-    pub action: RecommendedAction,
-    pub confidence: f64,
-    pub rationale: String,
-    pub modified_fix: Option<String>,
-}
-
 /// Human decision on a suggestion
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -92,7 +73,7 @@ pub enum ReviewStatus {
     Stale,
 }
 
-/// A complete review record combining all stages
+/// A complete review record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Review {
     pub id: Uuid,
@@ -102,14 +83,13 @@ pub struct Review {
     pub commit_sha: String,
     pub created_at: DateTime<Utc>,
     pub status: ReviewStatus,
-    pub suggestions: Vec<SuggestionWithRecommendation>,
+    pub suggestions: Vec<SuggestionItem>,
 }
 
-/// A suggestion paired with its recommendation and decision
+/// A suggestion with its decision
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuggestionWithRecommendation {
+pub struct SuggestionItem {
     pub suggestion: Suggestion,
-    pub recommendation: Option<Recommendation>,
     pub decision: Option<DecisionRecord>,
 }
 
@@ -145,7 +125,7 @@ impl Review {
     }
 
     /// Get pending suggestions (no human decision yet)
-    pub fn pending_suggestions(&self) -> Vec<&SuggestionWithRecommendation> {
+    pub fn pending_suggestions(&self) -> Vec<&SuggestionItem> {
         self.suggestions
             .iter()
             .filter(|s| s.decision.is_none())
@@ -153,7 +133,7 @@ impl Review {
     }
 
     /// Get suggestions by severity
-    pub fn suggestions_by_severity(&self, severity: Severity) -> Vec<&SuggestionWithRecommendation> {
+    pub fn suggestions_by_severity(&self, severity: Severity) -> Vec<&SuggestionItem> {
         self.suggestions
             .iter()
             .filter(|s| s.suggestion.severity == severity)
