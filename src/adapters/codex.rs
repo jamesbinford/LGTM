@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
 
 use crate::models::{Location, ReviewContext, Severity, Suggestion, SuggestionType};
+use crate::suppressions::Suppressions;
 
 /// Adapter for OpenAI Codex code review
 pub struct CodexAdapter {
@@ -84,12 +85,17 @@ impl CodexAdapter {
         self
     }
 
-    #[instrument(skip(self, diff), fields(pr = context.pr_number, repo = %context.repo))]
-    pub async fn review(&self, diff: &str, context: &ReviewContext) -> Result<Vec<Suggestion>> {
+    #[instrument(skip(self, diff, suppressions), fields(pr = context.pr_number, repo = %context.repo))]
+    pub async fn review(
+        &self,
+        diff: &str,
+        context: &ReviewContext,
+        suppressions: Option<&Suppressions>,
+    ) -> Result<Vec<Suggestion>> {
         info!("Starting Codex review");
 
         let system_prompt = self.build_system_prompt();
-        let user_prompt = self.build_user_prompt(diff, context);
+        let user_prompt = self.build_user_prompt(diff, context, suppressions);
 
         let request = ChatRequest {
             model: self.model.clone(),
@@ -182,14 +188,24 @@ If there are no issues, return: {"suggestions": []}"#
             .to_string()
     }
 
-    fn build_user_prompt(&self, diff: &str, context: &ReviewContext) -> String {
+    fn build_user_prompt(
+        &self,
+        diff: &str,
+        context: &ReviewContext,
+        suppressions: Option<&Suppressions>,
+    ) -> String {
         let target = match context.pr_number {
             Some(pr) => format!("PR #{}", pr),
             None => format!("commit {}", &context.commit_sha[..7.min(context.commit_sha.len())]),
         };
+
+        let suppression_prompt = suppressions
+            .map(|s| s.to_prompt(None))
+            .unwrap_or_default();
+
         format!(
-            "Review this diff from {} in {}:\n\n```diff\n{}\n```",
-            target, context.repo, diff
+            "Review this diff from {} in {}:\n\n```diff\n{}\n```{}",
+            target, context.repo, diff, suppression_prompt
         )
     }
 

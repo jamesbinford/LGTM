@@ -6,6 +6,7 @@ pub mod models;
 pub mod notifications;
 pub mod orchestrator;
 pub mod rules;
+pub mod suppressions;
 
 pub use adapters::CodexAdapter;
 pub use config::Config;
@@ -15,3 +16,4 @@ pub use models::*;
 pub use notifications::NotificationService;
 pub use orchestrator::{generate_summary, Orchestrator};
 pub use rules::RulesEngine;
+pub use suppressions::{create_suppression, Suppression, Suppressions};

@@ -4,6 +4,7 @@ use tracing::info;
 use crate::adapters::CodexAdapter;
 use crate::ledger::Ledger;
 use crate::models::{Review, ReviewContext, ReviewStatus, SuggestionItem};
+use crate::suppressions::Suppressions;
 
 /// Orchestrates the AI review pipeline
 pub struct Orchestrator<L: Ledger> {
@@ -20,7 +21,12 @@ impl<L: Ledger> Orchestrator<L> {
     }
 
     /// Run the review pipeline for a PR or commit
-    pub async fn review(&self, diff: &str, context: ReviewContext) -> Result<Review> {
+    pub async fn review(
+        &self,
+        diff: &str,
+        context: ReviewContext,
+        suppressions: Option<&Suppressions>,
+    ) -> Result<Review> {
         info!(
             pr = ?context.pr_number,
             repo = %context.repo,
@@ -50,7 +56,7 @@ impl<L: Ledger> Orchestrator<L> {
         info!("Running Codex review");
         let suggestions = self
             .codex
-            .review(diff, &context)
+            .review(diff, &context, suppressions)
             .await
             .context("Codex review failed")?;
 
@@ -162,6 +168,19 @@ pub fn generate_summary(review: &Review) -> String {
 
         if let Some(fix) = &s.proposed_fix {
             md.push_str(&format!("**Proposed fix:**\n```\n{}\n```\n\n", fix));
+        }
+
+        // Show decision if available
+        if let Some(decision) = &item.decision {
+            let decision_emoji = match decision.decision {
+                crate::models::HumanDecision::Accepted => "✅ ACCEPTED",
+                crate::models::HumanDecision::Rejected => "❌ REJECTED",
+                crate::models::HumanDecision::Deferred => "⏸️ DEFERRED",
+            };
+            md.push_str(&format!("**Decision:** {} by {}\n", decision_emoji, decision.decided_by));
+            if let Some(reason) = &decision.reason {
+                md.push_str(&format!("> {}\n\n", reason));
+            }
         }
 
         md.push_str("---\n\n");
