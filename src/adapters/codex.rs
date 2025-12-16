@@ -30,14 +30,6 @@ struct Message {
 struct ResponseFormat {
     #[serde(rename = "type")]
     format_type: String,
-    json_schema: JsonSchema,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonSchema {
-    name: String,
-    strict: bool,
-    schema: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,17 +155,30 @@ impl CodexAdapter {
 - performance: inefficient algorithms, unnecessary allocations, N+1 queries
 - logic: bugs, edge cases, incorrect behavior
 - style: readability issues, naming, code organization (only significant issues)
-
-For each issue, provide:
-- A unique ID (S001, S002, etc.)
-- The category (security, performance, logic, style)
-- Severity (critical, high, medium, low)
-- Exact file and line numbers
-- Clear description of the problem
-- A proposed fix (actual code when possible)
+- documentation: missing or incorrect documentation
 
 Focus on substantive issues. Ignore minor style preferences.
-Only review the changed lines (+ lines in diff), not removed lines."#
+Only review the changed lines (+ lines in diff), not removed lines.
+
+Respond with a JSON object in this exact format:
+{
+  "suggestions": [
+    {
+      "id": "S001",
+      "type": "security|performance|logic|style|documentation",
+      "severity": "critical|high|medium|low",
+      "location": {
+        "file": "path/to/file.rs",
+        "line_start": 10,
+        "line_end": 15
+      },
+      "description": "Clear description of the issue",
+      "proposed_fix": "The suggested fix or null if not applicable"
+    }
+  ]
+}
+
+If there are no issues, return: {"suggestions": []}"#
             .to_string()
     }
 
@@ -190,43 +195,7 @@ Only review the changed lines (+ lines in diff), not removed lines."#
 
     fn build_response_format(&self) -> ResponseFormat {
         ResponseFormat {
-            format_type: "json_schema".to_string(),
-            json_schema: JsonSchema {
-                name: "code_review".to_string(),
-                strict: true,
-                schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "suggestions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "id": { "type": "string" },
-                                    "type": { "type": "string", "enum": ["security", "performance", "logic", "style", "documentation"] },
-                                    "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-                                    "location": {
-                                        "type": "object",
-                                        "properties": {
-                                            "file": { "type": "string" },
-                                            "line_start": { "type": "integer" },
-                                            "line_end": { "type": "integer" }
-                                        },
-                                        "required": ["file", "line_start", "line_end"],
-                                        "additionalProperties": false
-                                    },
-                                    "description": { "type": "string" },
-                                    "proposed_fix": { "type": ["string", "null"] }
-                                },
-                                "required": ["id", "type", "severity", "location", "description", "proposed_fix"],
-                                "additionalProperties": false
-                            }
-                        }
-                    },
-                    "required": ["suggestions"],
-                    "additionalProperties": false
-                }),
-            },
+            format_type: "json_object".to_string(),
         }
     }
 
