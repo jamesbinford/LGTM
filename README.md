@@ -1,35 +1,36 @@
-# LGTM - Multi-Agent AI Code Review Pipeline
+# LGTM - AI Code Review Pipeline
 
-LGTM is an automated code review system written in Rust that coordinates multiple AI models in a pipeline:
+LGTM is an automated code review system written in Rust that uses OpenAI GPT-4o to review code changes in CI, with results committed back to the repository for human review.
 
-1. **OpenAI GPT-4o** performs initial code review on PR diffs
-2. **Claude** evaluates and recommends actions on those suggestions
-3. **Humans** make final decisions via CLI or PR comments
-4. All decisions are persisted to a **decision ledger**
+## How It Works
+
+1. **OpenAI GPT-4o** reviews diffs on PRs and commits to main
+2. **Review results** are committed as markdown files to `lgtm-reviews/`
+3. **Developers** pull and review findings with their local tools (e.g., Claude Code)
+4. **Rejected findings** are suppressed to prevent re-flagging
 
 ## Features
 
-- Multi-stage AI review pipeline with configurable models
-- GitHub Actions integration for automatic PR reviews
-- PostgreSQL or JSON file persistence
+- Automatic code review on PRs and pushes to main
+- Reviews persisted as markdown in the repository
+- Suppression system with code-change detection (suppressions auto-expire when code changes)
+- JSON or PostgreSQL persistence for review metadata
 - Auto-rules engine for automatic decisions
-- Slack notifications for critical issues
 - Configurable file patterns and severity thresholds
 
 ## Requirements
 
 - Rust 1.70+
 - OpenAI API key
-- Anthropic API key
 - GitHub token (for PR integration)
-- PostgreSQL (optional, for production)
+- PostgreSQL (optional, for production metadata)
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/lgtm.git
-cd lgtm
+git clone https://github.com/jamesbinford/LGTM.git
+cd LGTM
 
 # Build
 cargo build --release
@@ -43,8 +44,7 @@ The binary will be at `target/release/ai-review`.
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
-export GITHUB_TOKEN="ghp_..."           # Optional: for PR comments
+export GITHUB_TOKEN="ghp_..."           # For PR comments and diff fetching
 export DATABASE_URL="postgres://..."     # Optional: for PostgreSQL backend
 ```
 
@@ -82,32 +82,40 @@ auto_rules:
     action: auto_dismiss
     reason: "Aged out - low severity style issue"
 
-  - condition: "claude_action == 'accept' AND claude_confidence > 0.95"
-    action: auto_accept
-    reason: "High confidence Claude recommendation"
-
 # Staleness handling
 staleness:
   warn_after_days: 3
   escalate_after_days: 7
-
-# Slack notifications
-notifications:
-  slack:
-    enabled: false
-    channel: "#code-review"
-    on_critical: true
-    on_new_review: false
 
 # Model configuration
 models:
   codex:
     model: "gpt-4o"
     temperature: 0.1
-  claude:
-    model: "claude-sonnet-4-20250514"
-    temperature: 0.1
 ```
+
+### Suppressions
+
+Suppress findings that have been reviewed and rejected by adding entries to `.ai-review/suppressions.yml`:
+
+```yaml
+items:
+  - id: "S001-example"
+    file: "src/example.rs"
+    line_start: 10
+    line_end: 15
+    finding_type: "logic"  # Optional: security, performance, logic, style, documentation
+    pattern: "some text"   # Optional: match description containing this text
+    reason: "Intentional design decision"
+    suppressed_by: "developer"
+    suppressed_at: "2024-01-15T12:00:00Z"
+    content_hash: "abc123def456"  # Optional: auto-expires if code changes
+    expires: "2024-06-15T12:00:00Z"  # Optional: explicit expiry date
+```
+
+Suppressions automatically expire when:
+- The explicit `expires` date passes
+- The code at the specified lines changes (detected via content hash)
 
 ## Usage
 
@@ -123,7 +131,15 @@ ai-review review \
   --diff-file pr.diff \
   --output review_summary.md
 
-# Fetch diff from GitHub and post comment
+# Review a commit (no PR)
+ai-review review \
+  --repo owner/repo \
+  --sha abc123 \
+  --branch main \
+  --diff-file commit.diff \
+  --output review_summary.md
+
+# Fetch diff from GitHub and post comment to PR
 ai-review review \
   --pr 123 \
   --repo owner/repo \
@@ -153,25 +169,19 @@ ai-review decide 123 \
   --suggestion S001 \
   --accept \
   --reason "Good catch" \
-  --user "developer@example.com"
+  --user "developer"
 
 # Reject a suggestion
 ai-review decide 123 \
   --repo owner/repo \
   --suggestion S002 \
   --reject \
-  --reason "False positive"
-```
-
-### Custom Ledger Path
-
-```bash
-ai-review --ledger-path ./custom-ledger pending
+  --reason "False positive - intentional behavior"
 ```
 
 ## GitHub Actions Integration
 
-Add this workflow to `.github/workflows/ai-review.yml`:
+Add this workflow to `.github/workflows/ai-reviews.yml`:
 
 ```yaml
 name: AI Code Review
@@ -179,16 +189,21 @@ name: AI Code Review
 on:
   pull_request:
     types: [opened, synchronize]
+  push:
+    branches:
+      - main
 
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number }}
+  group: ai-review-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   ai-review:
+    # Skip reviews on bot commits to prevent infinite loops
+    if: github.event_name == 'pull_request' || github.event.head_commit.author.name != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 
     steps:
@@ -205,12 +220,16 @@ jobs:
 
       - name: Generate diff
         run: |
-          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          else
+            git diff ${{ github.event.before }}..${{ github.sha }} > pr_diff.txt
+          fi
 
-      - name: Run AI Review
+      - name: Run AI Review (PR)
+        if: github.event_name == 'pull_request'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./target/release/ai-review review \
@@ -222,14 +241,26 @@ jobs:
             --output review_summary.md \
             --post-comment
 
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ai-review-results
-          path: |
-            review_summary.md
-            .ai-review/ledger/
-          retention-days: 30
+      - name: Run AI Review (Push)
+        if: github.event_name == 'push'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          ./target/release/ai-review review \
+            --repo ${{ github.repository }} \
+            --sha ${{ github.sha }} \
+            --branch ${{ github.ref_name }} \
+            --diff-file pr_diff.txt \
+            --output lgtm-reviews/${{ github.sha }}.md
+
+      - name: Commit review results
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lgtm-reviews/
+          git diff --staged --quiet || git commit -m "Add AI review for ${{ github.sha }}"
+          git push
 ```
 
 ## Architecture
@@ -239,18 +270,18 @@ jobs:
 │                     Review Pipeline                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  PR Diff ──► Codex (GPT-4o) ──► Claude ──► Human Decision   │
-│              │                  │          │                 │
-│              ▼                  ▼          ▼                 │
-│         Suggestions      Recommendations  Decisions          │
+│  PR/Commit Diff ──► Codex (GPT-4o) ──► Review Summary        │
+│                          │                   │               │
+│                          ▼                   ▼               │
+│                    Suggestions         lgtm-reviews/*.md     │
+│                          │                                   │
+│                          ▼                                   │
+│                  Ledger (JSON/PostgreSQL)                    │
 │                                                              │
-│              └────────────────┴────────────┘                 │
-│                              │                               │
-│                              ▼                               │
-│                         Ledger (JSON/PostgreSQL)             │
-│                              │                               │
-│                              ▼                               │
-│                      PR Comment / Summary                    │
+│  Developer pulls ──► Reviews with Claude Code ──► Decides    │
+│                                                  │           │
+│                                                  ▼           │
+│                                        suppressions.yml      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -258,16 +289,15 @@ jobs:
 
 | Component | Description |
 |-----------|-------------|
-| `orchestrator.rs` | Coordinates the multi-stage review pipeline |
-| `adapters/codex.rs` | OpenAI GPT-4o integration for initial review |
-| `adapters/claude.rs` | Anthropic Claude integration for evaluation |
+| `orchestrator.rs` | Coordinates the review pipeline |
+| `adapters/codex.rs` | OpenAI GPT-4o integration for code review |
 | `github/client.rs` | GitHub API client for PR comments and diffs |
 | `github/diff.rs` | Unified diff parsing utilities |
 | `ledger/json.rs` | File-based persistence (development) |
 | `ledger/postgres.rs` | PostgreSQL persistence (production) |
+| `suppressions.rs` | Suppression system with change detection |
 | `config.rs` | YAML configuration system |
 | `rules.rs` | Auto-rules engine for automatic decisions |
-| `notifications.rs` | Slack notification service |
 
 ## Data Models
 
@@ -286,16 +316,10 @@ jobs:
 - `Medium` - Should consider fixing
 - `Low` - Nice to have
 
-### Recommended Actions (from Claude)
-
-- `Accept` - Agree with the suggestion
-- `Reject` - Disagree with the suggestion
-- `Modify` - Agree but with modifications
-
 ### Human Decisions
 
 - `Accepted` - Apply the fix
-- `Rejected` - Ignore the suggestion
+- `Rejected` - Ignore the suggestion (add to suppressions)
 - `Deferred` - Review later
 
 ## Auto-Rules
@@ -304,17 +328,17 @@ Auto-rules automatically make decisions based on conditions:
 
 ```yaml
 auto_rules:
-  # Condition syntax: field operator value [AND/OR field operator value]
+  # Condition syntax: field operator value [AND field operator value]
   - condition: "severity == 'low' AND type == 'style'"
     action: auto_dismiss
     reason: "Auto-dismissed low severity style issue"
 
-  - condition: "claude_confidence > 0.95"
-    action: auto_accept
-    reason: "High confidence recommendation"
+  - condition: "age_days > 14"
+    action: auto_defer
+    reason: "Stale finding"
 ```
 
-**Supported fields:** `severity`, `type`, `age_days`, `claude_action`, `claude_confidence`
+**Supported fields:** `severity`, `type`, `age_days`, `file_path`
 
 **Supported operators:** `==`, `>`, `>=`, `<`, `<=`
 
@@ -331,10 +355,6 @@ export DATABASE_URL="postgres://user:pass@localhost/lgtm"
 # Migrations run automatically on first use
 ```
 
-The schema creates two tables:
-- `reviews` - PR review records
-- `suggestions` - Individual suggestions with recommendations and decisions
-
 ## Development
 
 ```bash
@@ -342,7 +362,7 @@ The schema creates two tables:
 cargo test
 
 # Run with logging
-RUST_LOG=debug cargo run -- review --pr 1 --repo test/repo --sha abc123
+RUST_LOG=debug cargo run -- review --repo test/repo --sha abc123 --diff-file test.diff
 
 # Format code
 cargo fmt
