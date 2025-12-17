@@ -1,0 +1,87 @@
+items:
+  # Codex adapter - json_schema removal (intentional workaround)
+  - id: "S001-codex-json-schema"
+    file: "src/adapters/codex.rs"
+    line_start: 195
+    line_end: 200
+    finding_type: "logic"
+    reason: "Intentional workaround - OpenAI API returns 500 errors with structured outputs. json_object mode with format in prompt is valid alternative."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:34:00Z"
+
+  # Suppressions module - MD5 usage
+  - id: "S001-md5-security"
+    file: "src/suppressions.rs"
+    line_start: 240
+    line_end: 262
+    finding_type: "security"
+    pattern: "MD5"
+    reason: "MD5 is used for change detection, not cryptographic purposes. Collision resistance not needed."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
+
+  # Suppressions module - file reading performance
+  - id: "S002-file-reading"
+    file: "src/suppressions.rs"
+    line_start: 240
+    line_end: 262
+    finding_type: "performance"
+    pattern: "file"
+    reason: "File reading is already optimized - extracts only relevant lines. Streaming would add complexity for minimal gain."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
+
+  # Suppressions module - None handling
+  - id: "S003-none-handling"
+    file: "src/suppressions.rs"
+    line_start: 240
+    line_end: 262
+    finding_type: "logic"
+    pattern: "None"
+    reason: "All callers properly handle None with if let Some(...) patterns. This is idiomatic Rust."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
+
+  # Suppressions module - documentation
+  - id: "S004-docs"
+    file: "src/suppressions.rs"
+    line_start: 240
+    line_end: 262
+    finding_type: "documentation"
+    pattern: "documentation"
+    reason: "Doc comment already exists on line 242."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
+
+  # README - GITHUB_TOKEN permission
+  - id: "S001-github-token"
+    file: "README.md"
+    line_start: 200
+    line_end: 265
+    finding_type: "security"
+    pattern: "GITHUB_TOKEN"
+    reason: "contents:write permission is required to commit reviews. Token is GitHub's built-in scoped token with proper guards."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
+
+  # README - git diff performance
+  - id: "S002-git-diff"
+    file: "README.md"
+    line_start: 200
+    line_end: 265
+    finding_type: "performance"
+    pattern: "diff"
+    reason: "A code review tool needs to see ALL changes. Limiting diff scope defeats the purpose."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
+
+  # README - Claude references
+  - id: "S003-claude-reference"
+    file: "README.md"
+    line_start: 1
+    line_end: 400
+    finding_type: "documentation"
+    pattern: "Claude"
+    reason: "Claude Code reference is intentional - it's the local developer tool for reviewing findings, not the removed API integration."
+    suppressed_by: "claude"
+    suppressed_at: "2024-12-15T21:50:00Z"
