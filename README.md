@@ -13,7 +13,7 @@ LGTM is an automated code review system written in Rust that uses OpenAI GPT-4o 
 
 - Automatic code review on PRs and pushes to main
 - Reviews persisted as markdown in the repository
-- Suppression system with code-change detection (suppressions auto-expire when code changes)
+- Rejected findings automatically excluded from future reviews
 - JSON or PostgreSQL persistence for review metadata
 - Auto-rules engine for automatic decisions
 - Configurable file patterns and severity thresholds
@@ -94,28 +94,16 @@ models:
     temperature: 0.1
 ```
 
-### Suppressions
+### Rejecting Findings
 
-Suppress findings that have been reviewed and rejected by adding entries to `.ai-review/suppressions.yml`:
+When you review a finding and decide to reject it, add a decision block to the review markdown file in `lgtm-reviews/`:
 
-```yaml
-items:
-  - id: "S001-example"
-    file: "src/example.rs"
-    line_start: 10
-    line_end: 15
-    finding_type: "logic"  # Optional: security, performance, logic, style, documentation
-    pattern: "some text"   # Optional: match description containing this text
-    reason: "Intentional design decision"
-    suppressed_by: "developer"
-    suppressed_at: "2024-01-15T12:00:00Z"
-    content_hash: "abc123def456"  # Optional: auto-expires if code changes
-    expires: "2024-06-15T12:00:00Z"  # Optional: explicit expiry date
+```markdown
+**Decision:** ❌ REJECTED by yourname
+> Reason for rejection goes here.
 ```
 
-Suppressions automatically expire when:
-- The explicit `expires` date passes
-- The code at the specified lines changes (detected via content hash)
+Codex automatically parses all review files for rejected findings and includes them in the prompt to avoid re-flagging the same issues.
 
 ## Usage
 
@@ -281,7 +269,7 @@ jobs:
 │  Developer pulls ──► Reviews with Claude Code ──► Decides    │
 │                                                  │           │
 │                                                  ▼           │
-│                                        suppressions.yml      │
+│                                     Rejections in markdown   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -295,7 +283,7 @@ jobs:
 | `github/diff.rs` | Unified diff parsing utilities |
 | `ledger/json.rs` | File-based persistence (development) |
 | `ledger/postgres.rs` | PostgreSQL persistence (production) |
-| `suppressions.rs` | Suppression system with change detection |
+| `suppressions.rs` | Parses rejected findings from review markdown |
 | `config.rs` | YAML configuration system |
 | `rules.rs` | Auto-rules engine for automatic decisions |
 
@@ -319,7 +307,7 @@ jobs:
 ### Human Decisions
 
 - `Accepted` - Apply the fix
-- `Rejected` - Ignore the suggestion (add to suppressions)
+- `Rejected` - Ignore the suggestion (excluded from future reviews)
 - `Deferred` - Review later
 
 ## Auto-Rules

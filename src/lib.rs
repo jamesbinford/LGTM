@@ -16,4 +16,4 @@ pub use models::*;
 pub use notifications::NotificationService;
 pub use orchestrator::{generate_summary, Orchestrator};
 pub use rules::RulesEngine;
-pub use suppressions::{create_suppression, Suppression, Suppressions};
+pub use suppressions::Rejections;

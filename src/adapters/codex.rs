@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
 
 use crate::models::{Location, ReviewContext, Severity, Suggestion, SuggestionType};
-use crate::suppressions::Suppressions;
+use crate::suppressions::Rejections;
 
 /// Adapter for OpenAI Codex code review
 pub struct CodexAdapter {
@@ -85,17 +85,17 @@ impl CodexAdapter {
         self
     }
 
-    #[instrument(skip(self, diff, suppressions), fields(pr = context.pr_number, repo = %context.repo))]
+    #[instrument(skip(self, diff, rejections), fields(pr = context.pr_number, repo = %context.repo))]
     pub async fn review(
         &self,
         diff: &str,
         context: &ReviewContext,
-        suppressions: Option<&Suppressions>,
+        rejections: Option<&Rejections>,
     ) -> Result<Vec<Suggestion>> {
         info!("Starting Codex review");
 
         let system_prompt = self.build_system_prompt();
-        let user_prompt = self.build_user_prompt(diff, context, suppressions);
+        let user_prompt = self.build_user_prompt(diff, context, rejections);
 
         let request = ChatRequest {
             model: self.model.clone(),
@@ -192,20 +192,20 @@ If there are no issues, return: {"suggestions": []}"#
         &self,
         diff: &str,
         context: &ReviewContext,
-        suppressions: Option<&Suppressions>,
+        rejections: Option<&Rejections>,
     ) -> String {
         let target = match context.pr_number {
             Some(pr) => format!("PR #{}", pr),
             None => format!("commit {}", &context.commit_sha[..7.min(context.commit_sha.len())]),
         };
 
-        let suppression_prompt = suppressions
-            .map(|s| s.to_prompt(None))
+        let rejections_prompt = rejections
+            .map(|r| r.to_prompt())
             .unwrap_or_default();
 
         format!(
             "Review this diff from {} in {}:\n\n```diff\n{}\n```{}",
-            target, context.repo, diff, suppression_prompt
+            target, context.repo, diff, rejections_prompt
         )
     }
 

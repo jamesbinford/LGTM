@@ -4,7 +4,7 @@ use tracing::info;
 use crate::adapters::CodexAdapter;
 use crate::ledger::Ledger;
 use crate::models::{Review, ReviewContext, ReviewStatus, SuggestionItem};
-use crate::suppressions::Suppressions;
+use crate::suppressions::Rejections;
 
 /// Orchestrates the AI review pipeline
 pub struct Orchestrator<L: Ledger> {
@@ -25,7 +25,7 @@ impl<L: Ledger> Orchestrator<L> {
         &self,
         diff: &str,
         context: ReviewContext,
-        suppressions: Option<&Suppressions>,
+        rejections: Option<&Rejections>,
     ) -> Result<Review> {
         info!(
             pr = ?context.pr_number,
@@ -56,7 +56,7 @@ impl<L: Ledger> Orchestrator<L> {
         info!("Running Codex review");
         let suggestions = self
             .codex
-            .review(diff, &context, suppressions)
+            .review(diff, &context, rejections)
             .await
             .context("Codex review failed")?;
 

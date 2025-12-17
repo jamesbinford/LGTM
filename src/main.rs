@@ -8,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 
 use ai_review::{
     generate_summary, CodexAdapter, GitHubClient, JsonLedger, Ledger,
-    Orchestrator, ReviewContext, Suppressions,
+    Orchestrator, Rejections, ReviewContext,
 };
 
 #[derive(Parser)]
@@ -184,10 +184,10 @@ async fn run_review(
     let codex = CodexAdapter::new(openai_key);
     let ledger = JsonLedger::new(&ledger_path)?;
 
-    // Load suppressions
-    let suppressions = Suppressions::load_default()
-        .context("Failed to load suppressions")?;
-    info!(count = suppressions.items.len(), "Loaded suppressions");
+    // Load rejected findings from previous reviews
+    let rejections = Rejections::load_default()
+        .context("Failed to load rejections")?;
+    info!(count = rejections.items.len(), "Loaded rejected findings");
 
     let orchestrator = Orchestrator::new(codex, ledger);
 
@@ -232,7 +232,7 @@ async fn run_review(
     };
 
     let review = orchestrator
-        .review(&diff, context, Some(&suppressions))
+        .review(&diff, context, Some(&rejections))
         .await?;
 
     // Generate and write summary

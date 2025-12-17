@@ -1,358 +1,251 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use anyhow::Result;
 use tracing::{debug, info};
 
-/// A suppressed finding that should not be re-reported
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Suppression {
-    /// Unique identifier for this suppression
-    pub id: String,
-    /// File path where the finding was suppressed
+/// A rejected finding extracted from review markdown files
+#[derive(Debug, Clone)]
+pub struct RejectedFinding {
     pub file: String,
-    /// Starting line number
     pub line_start: u32,
-    /// Ending line number
     pub line_end: u32,
-    /// Type of finding (security, performance, logic, style, documentation)
-    pub finding_type: Option<String>,
-    /// Pattern to match in the description (optional)
-    pub pattern: Option<String>,
-    /// Reason for suppression
+    pub finding_type: String,
+    pub description: String,
     pub reason: String,
-    /// Who suppressed it
-    pub suppressed_by: String,
-    /// When it was suppressed
-    pub suppressed_at: DateTime<Utc>,
-    /// Git blob hash of the suppressed lines (for change detection)
-    pub content_hash: Option<String>,
-    /// Explicit expiry date (optional)
-    pub expires: Option<DateTime<Utc>>,
 }
 
-/// Collection of suppressions
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Suppressions {
-    #[serde(default)]
-    pub items: Vec<Suppression>,
+/// Collection of rejected findings from review files
+#[derive(Debug, Clone, Default)]
+pub struct Rejections {
+    pub items: Vec<RejectedFinding>,
 }
 
-impl Suppressions {
-    /// Load suppressions from a YAML file
-    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+impl Rejections {
+    /// Load rejections by parsing markdown files in lgtm-reviews/
+    pub fn load_from_reviews(reviews_dir: impl AsRef<Path>) -> Result<Self> {
+        let reviews_dir = reviews_dir.as_ref();
+        let mut items = Vec::new();
 
-        if !path.exists() {
-            debug!(path = %path.display(), "Suppressions file not found, using empty list");
+        if !reviews_dir.exists() {
+            debug!(path = %reviews_dir.display(), "Reviews directory not found");
             return Ok(Self::default());
         }
 
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read suppressions file: {}", path.display()))?;
+        // Read all .md files in the directory
+        for entry in fs::read_dir(reviews_dir)? {
+            let entry = entry?;
+            let path = entry.path();
 
-        let suppressions: Suppressions = serde_yaml::from_str(&content)
-            .with_context(|| format!("Failed to parse suppressions file: {}", path.display()))?;
+            if path.extension().map_or(false, |ext| ext == "md") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    let findings = parse_rejections(&content);
+                    items.extend(findings);
+                }
+            }
+        }
 
-        info!(
-            path = %path.display(),
-            count = suppressions.items.len(),
-            "Loaded suppressions"
-        );
+        info!(count = items.len(), "Loaded rejected findings from reviews");
 
-        Ok(suppressions)
+        Ok(Self { items })
     }
 
     /// Load from the default location
     pub fn load_default() -> Result<Self> {
-        Self::load(".ai-review/suppressions.yml")
+        Self::load_from_reviews("lgtm-reviews")
     }
 
-    /// Save suppressions to a YAML file
-    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let content = serde_yaml::to_string(self)
-            .context("Failed to serialize suppressions")?;
-
-        fs::write(path, content)
-            .with_context(|| format!("Failed to write suppressions file: {}", path.display()))?;
-
-        info!(path = %path.display(), "Saved suppressions");
-
-        Ok(())
-    }
-
-    /// Save to the default location
-    pub fn save_default(&self) -> Result<()> {
-        self.save(".ai-review/suppressions.yml")
-    }
-
-    /// Add a new suppression
-    pub fn add(&mut self, suppression: Suppression) {
-        // Remove any existing suppression with the same ID
-        self.items.retain(|s| s.id != suppression.id);
-        self.items.push(suppression);
-    }
-
-    /// Get active (non-expired, non-stale) suppressions
-    pub fn active(&self, repo_root: Option<&Path>) -> Vec<&Suppression> {
-        let now = Utc::now();
-
-        self.items
-            .iter()
-            .filter(|s| {
-                // Check explicit expiry
-                if let Some(expires) = s.expires {
-                    if now > expires {
-                        debug!(id = %s.id, "Suppression expired by date");
-                        return false;
-                    }
-                }
-
-                // Check if code has changed (content hash mismatch)
-                if let Some(ref expected_hash) = s.content_hash {
-                    if let Some(root) = repo_root {
-                        if let Some(current_hash) = get_content_hash(root, &s.file, s.line_start, s.line_end) {
-                            if &current_hash != expected_hash {
-                                debug!(
-                                    id = %s.id,
-                                    expected = %expected_hash,
-                                    current = %current_hash,
-                                    "Suppression invalidated by code change"
-                                );
-                                return false;
-                            }
-                        }
-                    }
-                }
-
-                true
-            })
-            .collect()
-    }
-
-    /// Check if a finding should be suppressed
-    pub fn is_suppressed(
-        &self,
-        file: &str,
-        line_start: u32,
-        line_end: u32,
-        finding_type: &str,
-        description: &str,
-        repo_root: Option<&Path>,
-    ) -> Option<&Suppression> {
-        for suppression in self.active(repo_root) {
-            // Check file match
-            if suppression.file != file {
-                continue;
-            }
-
-            // Check line overlap
-            let overlaps = line_start <= suppression.line_end && line_end >= suppression.line_start;
-            if !overlaps {
-                continue;
-            }
-
-            // Check finding type match (if specified)
-            if let Some(ref stype) = suppression.finding_type {
-                if stype != finding_type {
-                    continue;
-                }
-            }
-
-            // Check pattern match (if specified)
-            if let Some(ref pattern) = suppression.pattern {
-                if !description.to_lowercase().contains(&pattern.to_lowercase()) {
-                    continue;
-                }
-            }
-
-            // All checks passed - this finding is suppressed
-            return Some(suppression);
-        }
-
-        None
-    }
-
-    /// Generate a prompt snippet listing active suppressions for OpenAI
-    pub fn to_prompt(&self, repo_root: Option<&Path>) -> String {
-        let active = self.active(repo_root);
-
-        if active.is_empty() {
+    /// Generate a prompt snippet listing rejected findings for OpenAI
+    pub fn to_prompt(&self) -> String {
+        if self.items.is_empty() {
             return String::new();
         }
 
-        let mut prompt = String::from("\n\nPreviously reviewed and suppressed findings (DO NOT report these again):\n");
+        let mut prompt = String::from("\n\nPreviously reviewed and REJECTED findings (DO NOT report these again):\n");
 
-        for s in active {
+        for r in &self.items {
             prompt.push_str(&format!(
-                "- {} (lines {}-{}): {} [Reason: {}]\n",
-                s.file, s.line_start, s.line_end,
-                s.pattern.as_deref().unwrap_or("any issue"),
-                s.reason
+                "- {} (lines {}-{}) [{}]: {} [Rejection reason: {}]\n",
+                r.file, r.line_start, r.line_end, r.finding_type, r.description, r.reason
             ));
         }
 
         prompt
     }
-
-    /// Remove expired and invalidated suppressions
-    pub fn cleanup(&mut self, repo_root: Option<&Path>) {
-        let now = Utc::now();
-        let initial_count = self.items.len();
-
-        self.items.retain(|s| {
-            // Remove expired
-            if let Some(expires) = s.expires {
-                if now > expires {
-                    return false;
-                }
-            }
-
-            // Remove if code changed
-            if let Some(ref expected_hash) = s.content_hash {
-                if let Some(root) = repo_root {
-                    if let Some(current_hash) = get_content_hash(root, &s.file, s.line_start, s.line_end) {
-                        if &current_hash != expected_hash {
-                            return false;
-                        }
-                    }
-                }
-            }
-
-            true
-        });
-
-        let removed = initial_count - self.items.len();
-        if removed > 0 {
-            info!(removed, "Cleaned up expired/invalidated suppressions");
-        }
-    }
 }
 
-/// Get a hash of specific lines in a file for change detection
-fn get_content_hash(repo_root: &Path, file: &str, line_start: u32, line_end: u32) -> Option<String> {
-    let file_path = repo_root.join(file);
-
-    let content = fs::read_to_string(&file_path).ok()?;
+/// Parse a review markdown file and extract rejected findings
+fn parse_rejections(content: &str) -> Vec<RejectedFinding> {
+    let mut findings = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
 
-    // Extract the relevant lines (1-indexed to 0-indexed)
-    let start = (line_start.saturating_sub(1)) as usize;
-    let end = (line_end as usize).min(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        // Look for suggestion headers like "#### 🟠 HIGH `S001` - Logic"
+        if lines[i].starts_with("####") && lines[i].contains('`') {
+            // Extract finding type from header
+            let finding_type = extract_finding_type(lines[i]);
 
-    if start >= lines.len() {
-        return None;
+            // Look for file info on next line: "**File:** `src/foo.rs` (lines 10-20)"
+            let mut file = String::new();
+            let mut line_start = 0u32;
+            let mut line_end = 0u32;
+
+            if i + 1 < lines.len() && lines[i + 1].starts_with("**File:**") {
+                if let Some((f, ls, le)) = parse_file_line(lines[i + 1]) {
+                    file = f;
+                    line_start = ls;
+                    line_end = le;
+                }
+            }
+
+            // Collect description lines until we hit a code block or section marker
+            let mut description = String::new();
+            let mut j = i + 2;
+            while j < lines.len() {
+                let line = lines[j];
+                if line.starts_with("**Proposed fix:**")
+                    || line.starts_with("**Decision:**")
+                    || line.starts_with("####")
+                    || line.starts_with("---")
+                {
+                    break;
+                }
+                if !line.is_empty() && !line.starts_with("**File:**") {
+                    if !description.is_empty() {
+                        description.push(' ');
+                    }
+                    description.push_str(line);
+                }
+                j += 1;
+            }
+
+            // Look for rejection marker: "**Decision:** ❌ REJECTED"
+            while j < lines.len() {
+                if lines[j].contains("❌ REJECTED") {
+                    // Next line(s) contain the reason (quoted with >)
+                    let mut reason = String::new();
+                    let mut k = j + 1;
+                    while k < lines.len() && lines[k].starts_with('>') {
+                        let r = lines[k].trim_start_matches('>').trim();
+                        if !reason.is_empty() {
+                            reason.push(' ');
+                        }
+                        reason.push_str(r);
+                        k += 1;
+                    }
+
+                    if !file.is_empty() {
+                        findings.push(RejectedFinding {
+                            file,
+                            line_start,
+                            line_end,
+                            finding_type: finding_type.clone(),
+                            description: description.trim().to_string(),
+                            reason,
+                        });
+                    }
+                    break;
+                }
+                if lines[j].starts_with("####") || lines[j].starts_with("---") {
+                    break;
+                }
+                j += 1;
+            }
+
+            i = j;
+        } else {
+            i += 1;
+        }
     }
 
-    let relevant_lines = &lines[start..end];
-    let combined = relevant_lines.join("\n");
-
-    // Simple hash using the content
-    Some(format!("{:x}", md5::compute(combined.as_bytes())))
+    findings
 }
 
-/// Create a suppression from a rejected review finding
-#[allow(clippy::too_many_arguments)]
-pub fn create_suppression(
-    id: &str,
-    file: &str,
-    line_start: u32,
-    line_end: u32,
-    finding_type: Option<&str>,
-    reason: &str,
-    suppressed_by: &str,
-    expires_days: Option<u32>,
-    repo_root: Option<&Path>,
-) -> Suppression {
-    let content_hash = repo_root.and_then(|root| get_content_hash(root, file, line_start, line_end));
-
-    let expires = expires_days.map(|days| {
-        Utc::now() + chrono::Duration::days(days as i64)
-    });
-
-    Suppression {
-        id: id.to_string(),
-        file: file.to_string(),
-        line_start,
-        line_end,
-        finding_type: finding_type.map(|s| s.to_string()),
-        pattern: None,
-        reason: reason.to_string(),
-        suppressed_by: suppressed_by.to_string(),
-        suppressed_at: Utc::now(),
-        content_hash,
-        expires,
+/// Extract finding type from header like "#### 🟠 HIGH `S001` - Logic"
+fn extract_finding_type(header: &str) -> String {
+    if let Some(dash_pos) = header.rfind(" - ") {
+        header[dash_pos + 3..].trim().to_lowercase()
+    } else {
+        "unknown".to_string()
     }
+}
+
+/// Parse file line like "**File:** `src/foo.rs` (lines 10-20)"
+fn parse_file_line(line: &str) -> Option<(String, u32, u32)> {
+    // Extract file path between backticks
+    let start = line.find('`')? + 1;
+    let end = line[start..].find('`')? + start;
+    let file = line[start..end].to_string();
+
+    // Extract line numbers from "(lines X-Y)"
+    let lines_start = line.find("(lines ")? + 7;
+    let lines_end = line[lines_start..].find(')')? + lines_start;
+    let lines_part = &line[lines_start..lines_end];
+
+    let parts: Vec<&str> = lines_part.split('-').collect();
+    if parts.len() == 2 {
+        let line_start: u32 = parts[0].parse().ok()?;
+        let line_end: u32 = parts[1].parse().ok()?;
+        return Some((file, line_start, line_end));
+    }
+
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
 
     #[test]
-    fn test_suppression_save_load() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("suppressions.yml");
+    fn test_parse_rejections() {
+        let content = r#"## AI Code Review Summary
 
-        let mut suppressions = Suppressions::default();
-        suppressions.add(Suppression {
-            id: "S001".to_string(),
-            file: "src/main.rs".to_string(),
-            line_start: 10,
-            line_end: 20,
-            finding_type: Some("logic".to_string()),
-            pattern: None,
-            reason: "Test suppression".to_string(),
-            suppressed_by: "test".to_string(),
-            suppressed_at: Utc::now(),
-            content_hash: None,
-            expires: None,
-        });
+#### 🟠 HIGH `S001` - Security
+**File:** `src/main.rs` (lines 10-15)
 
-        suppressions.save(&path).unwrap();
+This is a security issue description.
 
-        let loaded = Suppressions::load(&path).unwrap();
-        assert_eq!(loaded.items.len(), 1);
-        assert_eq!(loaded.items[0].id, "S001");
+**Proposed fix:**
+```
+Fix the issue
+```
+
+**Decision:** ❌ REJECTED by claude
+> This is intentional behavior for testing purposes.
+
+---
+
+#### 🟢 LOW `S002` - Style
+**File:** `src/lib.rs` (lines 20-25)
+
+This is a style issue.
+
+**Proposed fix:**
+```
+Format better
+```
+
+---
+"#;
+
+        let findings = parse_rejections(content);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, "src/main.rs");
+        assert_eq!(findings[0].line_start, 10);
+        assert_eq!(findings[0].line_end, 15);
+        assert_eq!(findings[0].finding_type, "security");
+        assert!(findings[0].reason.contains("intentional behavior"));
     }
 
     #[test]
-    fn test_is_suppressed() {
-        let mut suppressions = Suppressions::default();
-        suppressions.add(Suppression {
-            id: "S001".to_string(),
-            file: "src/main.rs".to_string(),
-            line_start: 10,
-            line_end: 20,
-            finding_type: Some("logic".to_string()),
-            pattern: None,
-            reason: "Test".to_string(),
-            suppressed_by: "test".to_string(),
-            suppressed_at: Utc::now(),
-            content_hash: None,
-            expires: None,
-        });
-
-        // Should be suppressed (overlapping lines, matching type)
-        assert!(suppressions.is_suppressed("src/main.rs", 15, 18, "logic", "Some issue", None).is_some());
-
-        // Should not be suppressed (different file)
-        assert!(suppressions.is_suppressed("src/other.rs", 15, 18, "logic", "Some issue", None).is_none());
-
-        // Should not be suppressed (non-overlapping lines)
-        assert!(suppressions.is_suppressed("src/main.rs", 25, 30, "logic", "Some issue", None).is_none());
-
-        // Should not be suppressed (different type)
-        assert!(suppressions.is_suppressed("src/main.rs", 15, 18, "security", "Some issue", None).is_none());
+    fn test_parse_file_line() {
+        let line = "**File:** `src/adapters/codex.rs` (lines 195-200)";
+        let result = parse_file_line(line);
+        assert!(result.is_some());
+        let (file, start, end) = result.unwrap();
+        assert_eq!(file, "src/adapters/codex.rs");
+        assert_eq!(start, 195);
+        assert_eq!(end, 200);
     }
 }
